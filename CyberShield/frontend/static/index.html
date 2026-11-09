@@ -1,0 +1,284 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TP IA COSTE GABIN </title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+
+<aside class="sidebar">
+    <h2>🛡 CyberShield</h2>
+    <p class="subtitle">Security Center</p>
+
+    <nav>
+        <a href="#dashboard">Dashboard</a>
+        <a href="#antivirus">Antivirus</a>
+        <a href="#cve">Vulnérabilités CVE</a>
+        <a href="#wifi">Wi-Fi / Bluetooth</a>
+        <a href="#history">Historique</a>
+    </nav>
+
+    <p class="footer">CyberShield v1.0</p>
+</aside>
+
+<main>
+
+<header>
+    <div>
+        <h1>Tableau de bord</h1>
+        <p>Centre de supervision cybersécurité</p>
+    </div>
+    <span id="connection">Connexion...</span>
+</header>
+
+<section id="dashboard">
+
+    <div class="stats">
+
+        <div class="stat">
+            <p>Analyses fichiers</p>
+            <h2 id="totalScans">0</h2>
+        </div>
+
+        <div class="stat">
+            <p>Fichiers infectés</p>
+            <h2 id="infected">0</h2>
+        </div>
+
+        <div class="stat">
+            <p>Vulnérabilités CVE</p>
+            <h2 id="totalCves">0</h2>
+        </div>
+
+        <div class="stat">
+            <p>Appareils détectés</p>
+            <h2 id="totalDevices">0</h2>
+        </div>
+
+    </div>
+
+</section>
+
+<section id="antivirus" class="panel">
+    <h2>🛡 Scanner antivirus</h2>
+    <p>Choisir un fichier à analyser avec ClamAV.</p>
+
+    <input type="file" id="fileInput">
+    <button onclick="scanFile()">Lancer l'analyse</button>
+
+    <pre id="scanResult"></pre>
+</section>
+
+<section id="cve" class="panel">
+    <h2>🐛 Recherche CVE</h2>
+
+    <input id="keyword" placeholder="Ex : Apache, OpenSSL...">
+    <button onclick="searchCVE()">Rechercher</button>
+
+    <div id="cveResults"></div>
+</section>
+
+<section id="wifi" class="panel">
+    <h2>📡 Wi-Fi et Bluetooth</h2>
+
+    <p>Les résultats sont transmis par l'ESP32 connecté en USB.</p>
+
+    <button onclick="loadDevices()">Actualiser les appareils</button>
+
+    <div id="deviceResults"></div>
+</section>
+
+<section id="history" class="panel">
+    <h2>📁 Historique des analyses</h2>
+
+    <button onclick="loadHistory()">Actualiser</button>
+
+    <div id="historyResults"></div>
+</section>
+
+</main>
+
+<script>
+
+async function api(url) {
+    const response = await fetch(url);
+
+    if (!response.ok) {
+        throw new Error("Erreur API : " + response.status);
+    }
+
+    return response.json();
+}
+
+async function refreshDashboard() {
+    try {
+        const stats = await api("/api/stats");
+        const status = await api("/api/status");
+
+        totalScans.textContent = stats.file_scans;
+        infected.textContent = stats.infected;
+        totalCves.textContent = stats.cves;
+        totalDevices.textContent = stats.devices;
+
+        connection.textContent =
+            status.status === "online" ? "● En ligne" : "● Hors ligne";
+
+    } catch (error) {
+        connection.textContent = "● Erreur API";
+    }
+}
+
+
+async function scanFile() {
+    const file = document.getElementById("fileInput").files[0];
+
+    if (!file) {
+        alert("Sélectionne un fichier.");
+        return;
+    }
+
+    const resultBox = document.getElementById("scanResult");
+    resultBox.textContent = "Analyse antivirus en cours...";
+
+    const form = new FormData();
+    form.append("file", file);
+
+    try {
+        const response = await fetch("/api/scan/file", {
+            method: "POST",
+            body: form
+        });
+
+        const raw = await response.text();
+
+        let result;
+
+        try {
+            result = JSON.parse(raw);
+        } catch {
+            throw new Error(
+                "Réponse serveur non JSON (HTTP " +
+                response.status + ") : " + raw.substring(0, 500)
+            );
+        }
+
+        if (!response.ok) {
+            throw new Error(
+                result.detail || "Erreur serveur"
+            );
+        }
+
+        resultBox.textContent =
+            JSON.stringify(result, null, 2);
+
+        refreshDashboard();
+
+    } catch (error) {
+        resultBox.textContent =
+            "ERREUR SCAN : " + error.message;
+    }
+}
+
+
+async function searchCVE() {
+    const keyword = document.getElementById("keyword").value;
+
+    cveResults.textContent = "Recherche en cours...";
+
+    try {
+        const data = await api(
+            "/api/cves/search?keyword=" +
+            encodeURIComponent(keyword)
+        );
+
+        cveResults.replaceChildren();
+
+        data.results.forEach(cve => {
+            const card = document.createElement("article");
+            card.className = "result";
+
+            const title = document.createElement("h3");
+            title.textContent = cve.cve_id;
+
+            const severity = document.createElement("p");
+            severity.textContent =
+                "Criticité : " + cve.severity +
+                " | CVSS : " + (cve.cvss ?? "N/A");
+
+            const description = document.createElement("p");
+            description.textContent = cve.description;
+
+            const solution = document.createElement("p");
+            solution.textContent = "Recommandation : " + cve.solution;
+
+            card.append(title, severity, description, solution);
+
+            (cve.references || []).forEach(url => {
+                if (url.startsWith("https://")) {
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.target = "_blank";
+                    link.rel = "noopener noreferrer";
+                    link.textContent = "Référence officielle";
+                    card.append(link);
+                }
+            });
+
+            cveResults.append(card);
+        });
+
+        refreshDashboard();
+
+    } catch (error) {
+        cveResults.textContent = error.message;
+    }
+}
+
+async function loadDevices() {
+    const data = await api("/api/devices");
+
+    deviceResults.replaceChildren();
+
+    data.forEach(device => {
+        const div = document.createElement("article");
+        div.className = "result";
+
+        div.textContent =
+            device.type.toUpperCase() + " | " +
+            device.name + " | " +
+            device.address + " | RSSI : " +
+            (device.rssi ?? "N/A");
+
+        deviceResults.append(div);
+    });
+}
+
+async function loadHistory() {
+    const data = await api("/api/history");
+
+    historyResults.replaceChildren();
+
+    data.forEach(scan => {
+        const div = document.createElement("article");
+        div.className = "result";
+
+        div.textContent =
+            scan.filename + " | " +
+            scan.status + " | " +
+            scan.created_at;
+
+        historyResults.append(div);
+    });
+}
+
+refreshDashboard();
+setInterval(refreshDashboard, 10000);
+
+</script>
+
+</body>
+</html>

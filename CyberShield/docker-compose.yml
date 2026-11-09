@@ -1,0 +1,50 @@
+
+services:
+
+  db:
+    image: postgres:16-alpine
+    container_name: cybershield-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cybershield
+      POSTGRES_USER: cyber
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cyber -d cybershield"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  clamav:
+    image: clamav/clamav:stable
+    container_name: cybershield-antivirus
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3310:3310"
+    volumes:
+      - clamav_data:/var/lib/clamav
+
+  api:
+    build: ./backend
+    container_name: cybershield-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://cyber:${DB_PASSWORD}@db:5432/cybershield
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: 3310
+      BRIDGE_TOKEN: ${BRIDGE_TOKEN}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./frontend/static:/app/static:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      clamav:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  clamav_data:
